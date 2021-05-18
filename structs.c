@@ -6,7 +6,7 @@
 #include "structs.h"
 
 int is_less(process_s* p1, process_s* p2) {
-    return (p1->ts < p2->ts) || (p1->id < p2->id);
+    return (p1->ts < p2->ts) || ((p1->ts == p2->ts) && (p1->id < p2->id));
 }
 
 process_s* create_process_s(int id, int ts) {
