@@ -11,7 +11,7 @@
 #include <pthread.h>
 #include "queue.h"
 /* odkomentować, jeżeli się chce DEBUGI */
-//#define DEBUG 
+#define DEBUG 
 
 typedef struct proc_queue_n process_queue_node;
 typedef struct proc process_s;
@@ -31,7 +31,7 @@ typedef struct proc process_s;
 #define T 10
 
 /* stany procesu */
-typedef enum {MEDIUM_PREPARE, WAITING_FOR_MEDIUM, WAITING_FOR_RESET, SHOP_PREPARE, WAITING_FOR_SHOP, IN_SHOP, IN_TUNNEL, WANNA_EXIT_TUNNEL, CHILL} state_t;
+typedef enum {INIT, MEDIUM_PREPARE, WAITING_FOR_MEDIUM, WAITING_FOR_RESET, SHOP_PREPARE, WAITING_FOR_SHOP, IN_SHOP, IN_TUNNEL, WANNA_EXIT_TUNNEL, CHILL} state_t;
 typedef enum {MEDIUM_REQUEST, MEDIUM_ACK, MEDIUM_RELEASE, MEDIUM_RESET, SHOP_REQUEST, SHOP_ACK, SHOP_RELEASE} message_t;
 
 state_t state;
@@ -61,10 +61,6 @@ void set_timestamp(int, int);
 
 void add_to_medium_queue(process_s* p, int i);
 
-
-void is_valid_message(state_t, message_t)
-}
-
 void main_loop();
 
 /* Typy wiadomości */
@@ -88,7 +84,7 @@ void main_loop();
                                             
 */
 #ifdef DEBUG
-#define debug(FORMAT,...) printf("%c[%d;%dm [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ##__VA_ARGS__, 27,0,37);
+#define debug(FORMAT,...) printf("%c[%d;%dm [%d] [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, ts, rank, ##__VA_ARGS__, 27,0,37);
 #else
 #define debug(...) ;
 #endif
@@ -104,6 +100,6 @@ void main_loop();
 #define P_CLR printf("%c[%d;%dm",27,0,37);
 
 /* printf ale z kolorkami i automatycznym wyświetlaniem RANK. Patrz debug wyżej po szczegóły, jak działa ustawianie kolorków */
-#define println(FORMAT, ...) printf("%c[%d;%dm [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ##__VA_ARGS__, 27,0,37);
+#define println(FORMAT, ...) printf("%c[%d;%dm [%d] [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, ts, rank, ##__VA_ARGS__, 27,0,37);
 
 #endif

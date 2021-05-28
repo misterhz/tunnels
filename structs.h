@@ -22,7 +22,7 @@ struct proc_queue_n {
 };
 
 int is_less(process_s*, process_s*);
-process_s* create_process_s(int, int, int);
+process_s* create_process_s(int id, int ts, int r_id);
 process_s* copy_process_s(process_s*);
 
 #endif //TUNNELS_STRUCTS_H

@@ -68,7 +68,7 @@ int init(int* argc, char*** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     srand(rank);
 
-    pthread_create( &comm_thread, NULL, start_comm_thread, 0);
+    // pthread_create( &comm_thread, NULL, start_comm_thread, 0);
 
     debug("jestem");
 
@@ -139,8 +139,14 @@ void change_state(state_t new_state) {
 }
 
 void send_packet(process_s *pkt, int destination, int tag) {
+    pkt->ts = ts;
     MPI_Send( pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
-    // TODO is send an event?
+    increase_timestamp(1);
+}
+
+void receive_packet(process_s* pkt, int tag, MPI_Status* status) {
+    MPI_Recv(pkt, 1, MPI_PACKET_T, MPI_ANY_SOURCE, tag, MPI_COMM_WORLD, status);
+    set_timestamp(pkt->ts, 1);
 }
 
 void increase_timestamp(int d) {
@@ -158,25 +164,55 @@ void set_timestamp(int new_ts, int d) {
 void main_loop()
 {
     srandom(rank);
-    while (state != 50) {
-        // int perc = random()%100; 
+    int ack_num = 0;
+    int msg_num = 0;
+    int flag = 0;
+    MPI_Status status;
 
-        // if (perc<STATE_CHANGE_PROB) {
-        //     if (stan==InRun) {
-		// debug("Zmieniam stan na wysyłanie");
-		// changeState( InSend );
-		// packet_t *pkt = malloc(sizeof(packet_t));
-		// pkt->data = perc;
-        //         changeTallow( -perc);
-        //         sleep( SEC_IN_STATE); // to nam zasymuluje, że wiadomość trochę leci w kanale
-        //                               // bez tego algorytm formalnie błędny za każdym razem dawałby poprawny wynik
-		send_packet( 0, (rank+1) % size, MEDIUM_PREPARE);
-		// changeState( InRun );
-		// debug("Skończyłem wysyłać");
-        //     } else {
-        //     }
-        // }
-        // sleep(SEC_IN_STATE);
+    process_s* response_packet = malloc(sizeof(response_packet));
+
+    while (1) {
+        // INIT
+        change_state(INIT);
+        process_s* pkt = create_process_s(rank, 0, 0);
+        for(int i = 0; i < size; i++) {
+            if(rank != i) {
+                send_packet(pkt, i, MEDIUM_REQUEST);
+            }
+        }
+        debug("sent MEDIUM_REQUEST to everyone");
+
+        change_state(WAITING_FOR_MEDIUM);
+        debug("switched state to WAITING_FOR_MEDIUM");
+
+        // TODO add me to medium_queue
+
+        // WAITING_FOR_MEDIUM
+        while(ack_num != size - 1) {
+            MPI_Iprobe(MPI_ANY_SOURCE, MEDIUM_ACK, MPI_COMM_WORLD, &flag, &status);
+            if(flag) {
+                MPI_Get_count(&status, MPI_PACKET_T, &msg_num);
+                debug("saw %d MEDIUM_ACK's", msg_num);
+                if(msg_num > 0) {
+                    receive_packet(response_packet, MEDIUM_ACK, &status);
+                    ++ack_num;
+                    debug("got MEDIUM_ACK from %d", response_packet->id);
+                }
+            }
+            
+            MPI_Iprobe(MPI_ANY_SOURCE, MEDIUM_REQUEST, MPI_COMM_WORLD, &flag, &status);
+            if(flag) {
+                MPI_Get_count(&status, MPI_PACKET_T, &msg_num);
+                if(msg_num > 0) {
+                    receive_packet(response_packet, MEDIUM_REQUEST, &status);
+                    debug("got MEDIUM_REQUEST from %d", response_packet->id);
+                    send_packet(pkt, response_packet->id, MEDIUM_ACK);
+                    debug("sent MEDIUM_ACK to %d", response_packet->id);
+                }
+            }
+        }
+        debug("in critical section");
+        sleep(1000);
     }
 }
 
@@ -201,4 +237,6 @@ void add_to_medium_queue(process_s* p, int i) {
 int main(int argc, char** argv) {
     init(&argc, &argv);
     printf("test\n");
+
+    main_loop();
 }
