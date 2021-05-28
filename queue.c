@@ -83,6 +83,50 @@ void queue_remove(process_queue_node** head, int id) {
     }
 }
 
+void queue_clear(process_queue_node** head){
+    if(*head == NULL)
+        return;
+    process_queue_node* to_be_removed = *head;
+    while(to_be_removed != NULL) {
+        process_queue_node* temp = to_be_removed->next;
+        free(to_be_removed->proc);
+        free(to_be_removed);
+        to_be_removed = temp;
+    }
+    *head = NULL;
+}
+
+process_queue_node* queue_copy(process_queue_node* src) {
+    process_queue_node* current_src = src;
+
+    process_queue_node* current_dst = NULL;
+    process_queue_node* prev_dst = NULL;
+
+    process_queue_node* dst_head = NULL;
+    int head_created = 0;
+    while(current_src != NULL) {
+        prev_dst = current_dst;
+        current_dst = malloc(sizeof(process_queue_node));
+
+        if(!head_created) {
+            dst_head = current_dst;
+            head_created = 1;
+        }
+        
+        process_s* src_process_s = current_src->proc;
+        process_s* dst_process_s = copy_process_s(src_process_s);
+
+        current_dst->proc = dst_process_s;
+
+        current_dst->prev = prev_dst;
+        if(prev_dst != NULL) {
+            prev_dst->next = current_dst;
+        }
+        current_src = current_src->next;
+    }
+    return dst_head;
+}
+
 int queue_is_head(process_queue_node* head, int id) {
 }
 
