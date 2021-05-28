@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include "queue.h"
 #include <stddef.h>
+#include <stdio.h>
 
 void queue_add(process_queue_node** head, process_s* p) {
     process_queue_node* node = malloc(sizeof(process_queue_node));
@@ -127,6 +128,21 @@ process_queue_node* queue_copy(process_queue_node* src) {
     return dst_head;
 }
 
-int queue_is_head(process_queue_node* head, int id) {
+int queue_get_position(process_queue_node* head, int id) {
+    process_queue_node* current_node = head;
+    int index = 0;
+    while(current_node->proc->id != id) {
+        current_node = current_node->next;
+        ++index;
+    }
+    return index;
+}
+
+void queue_print(process_queue_node* head) {
+    process_queue_node* current_node = head;
+    while(current_node != NULL) {
+        printf("id %d, ts %d\n", current_node->proc->id, current_node->proc->ts);
+        current_node = current_node->next;
+    }
 }
 

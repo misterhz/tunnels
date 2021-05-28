@@ -14,5 +14,6 @@ process_queue_node* queue_copy(process_queue_node*);
 int queue_is_head(process_queue_node*, int);
 int queue_exists(process_queue_node*, int);
 int queue_get_position(process_queue_node*, int);
+void queue_print(process_queue_node* head);
 
 #endif //TUNNELS_QUEUE_H

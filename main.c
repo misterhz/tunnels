@@ -73,6 +73,9 @@ int init(int* argc, char*** argv) {
     debug("jestem");
 
     medium_queue_table = malloc(M * sizeof(process_queue_node*));
+    for(int i = 0; i < M; i++) {
+        medium_queue_table[i] = NULL;
+    }
     // shop_queue doesn't need init
     in_tunnel_queue = malloc(M * sizeof(process_queue_node*));
 
@@ -85,52 +88,6 @@ int init(int* argc, char*** argv) {
     ts = 0;
 }
 
-void* start_comm_thread(void *ptr) {
-    MPI_Status status;
-    int is_message = FALSE;
-    process_s packet;
-    /* Obrazuje pętlę odbierającą pakiety o różnych typach */
-    while ( state != 50 ) {
-	debug("czekam na recv");
-    MPI_Recv( &packet, 1, MPI_PACKET_T, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    increase_timestamp(1);
-
-    switch(status.MPI_TAG) {
-        case MEDIUM_REQUEST:
-            if(state == WAITING_FOR_MEDIUM) {
-                add_to_medium_queue(copy_process_s(&packet), packet.resource_id);
-            }
-    }
-
-        // switch ( status.MPI_TAG ) {
-	    // case FINISH: 
-        //         changeState(InFinish);
-	    // break;
-	    // case TALLOWTRANSPORT: &argv
-        //         sendPacket(&pakiet, ROOT, STATE);
-        //         debug("Wysyłam mój stan do monitora: %d funtów łoju na składzie!", tallow);
-	    // break;
-        //     case STATE:
-        //         numberReceived++;
-        //         globalState += pakiet.data;
-        //         if (numberReceived > size-1) {
-        //             debug("W magazynach mamy %d funtów łoju.", globalState);
-        //         } 
-        //     break;
-	    // case INMONITOR: 
-        //         changeState( InMonitor );
-        //         debug("Od tej chwili czekam na polecenia od monitora");
-	    // break;
-	    // case INRUN: 
-        //         changeState( InRun );
-        //         debug("Od tej chwili decyzję podejmuję autonomicznie i losowo");
-	    // break;
-	    // default:
-	    // break;
-        // }
-    }
-}
-
 void change_state(state_t new_state) {
     pthread_mutex_lock(&state_mutex);
     state = new_state;
@@ -138,10 +95,38 @@ void change_state(state_t new_state) {
     pthread_mutex_unlock(&state_mutex);
 }
 
-void send_packet(process_s *pkt, int destination, int tag) {
+void send_packet(int resource_id, int destination, message_t tag) {
+    process_s* pkt = malloc(sizeof(process_s));
+    pkt->id = rank;
+    pkt->resource_id = resource_id;
     pkt->ts = ts;
     MPI_Send( pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
     increase_timestamp(1);
+    free(pkt);
+}
+
+void send_packet_ts(int resource_id, int p_ts, int destination, message_t tag) {
+    process_s* pkt = malloc(sizeof(process_s));
+    pkt->id = rank;
+    pkt->resource_id = resource_id;
+    pkt->ts = p_ts;
+    MPI_Send( pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
+    increase_timestamp(1);
+    free(pkt);
+}
+
+void send_packet_to_everyone(int resource_id, int destination, message_t tag) {
+    process_s* pkt = malloc(sizeof(process_s));
+    pkt->id = rank;
+    pkt->resource_id = resource_id;
+    for(int i = 0; i < rank; i++) {
+        if(i != rank) {
+            pkt->ts = ts;
+            MPI_Send(pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
+            increase_timestamp(1);
+        }       
+    }
+    free(pkt);
 }
 
 void receive_packet(process_s* pkt, int tag, MPI_Status* status) {
@@ -155,15 +140,27 @@ void increase_timestamp(int d) {
     pthread_mutex_unlock(&ts_mutex);
 }
 
-void set_timestamp(int new_ts, int d) {
+void set_timestamp(int packet_ts, int d) {
     pthread_mutex_lock(&ts_mutex);
-    ts = (ts > new_ts ? ts : new_ts) + d;
+    ts = (ts > packet_ts ? ts : packet_ts) + d;
     pthread_mutex_unlock(&ts_mutex);
+}
+
+int get_message_count(message_t type) {
+    MPI_Status status;
+    int msg_num = 0;
+    int flag;
+
+    MPI_Iprobe(MPI_ANY_SOURCE, type, MPI_COMM_WORLD, &flag, &status);
+    if(flag) {
+        MPI_Get_count(&status, MPI_PACKET_T, &msg_num);
+    }
+    return msg_num;
 }
 
 void main_loop()
 {
-    srandom(rank);
+    srandom(rank + 50);
     int ack_num = 0;
     int msg_num = 0;
     int flag = 0;
@@ -173,30 +170,48 @@ void main_loop()
 
     while (1) {
         // INIT
+
+        int chosen_medium = choose_medium_index();
+
+        println("wanna medium no. %d", chosen_medium);
+
         change_state(INIT);
-        process_s* pkt = create_process_s(rank, 0, 0);
+        int msg_ts = ts; // all processes have to have request with same ts
         for(int i = 0; i < size; i++) {
             if(rank != i) {
-                send_packet(pkt, i, MEDIUM_REQUEST);
+                send_packet_ts(chosen_medium, msg_ts, i, MEDIUM_REQUEST);
             }
         }
         debug("sent MEDIUM_REQUEST to everyone");
 
-        change_state(WAITING_FOR_MEDIUM);
-        debug("switched state to WAITING_FOR_MEDIUM");
+        add_to_medium_queue(create_process_s(rank, msg_ts, chosen_medium), chosen_medium);
+        debug("added myself to medium_queue[%d]", chosen_medium);
 
-        // TODO add me to medium_queue
+        change_state(WAITING_FOR_MEDIUM);
+        println("switched state to WAITING_FOR_MEDIUM");
 
         // WAITING_FOR_MEDIUM
         while(ack_num != size - 1) {
+            // usleep((random() % 1000) * 1000 * 1);
             MPI_Iprobe(MPI_ANY_SOURCE, MEDIUM_ACK, MPI_COMM_WORLD, &flag, &status);
             if(flag) {
                 MPI_Get_count(&status, MPI_PACKET_T, &msg_num);
-                debug("saw %d MEDIUM_ACK's", msg_num);
                 if(msg_num > 0) {
                     receive_packet(response_packet, MEDIUM_ACK, &status);
+
+                    int sender = response_packet->id;
                     ++ack_num;
-                    debug("got MEDIUM_ACK from %d", response_packet->id);
+
+                    debug("got MEDIUM_ACK from %d", sender);
+
+                    // int wanted_r_id = response_packet->resource_id;
+                    // if(wanted_r_id == -1) {
+                    //     debug("%d and I don't have conflict", sender);
+                    // } else {
+                    //     debug("%d and I are in conflict", sender);
+                    //     add_to_medium_queue(create_process_s(sender, response_packet->ts, wanted_r_id), wanted_r_id);
+                    //     debug("added %d to medium_queue[%d]", sender, chosen_medium);
+                    // }
                 }
             }
             
@@ -205,21 +220,58 @@ void main_loop()
                 MPI_Get_count(&status, MPI_PACKET_T, &msg_num);
                 if(msg_num > 0) {
                     receive_packet(response_packet, MEDIUM_REQUEST, &status);
-                    debug("got MEDIUM_REQUEST from %d", response_packet->id);
-                    send_packet(pkt, response_packet->id, MEDIUM_ACK);
-                    debug("sent MEDIUM_ACK to %d", response_packet->id);
+                    int sender = response_packet->id;
+                    int wanted_r_id = response_packet->resource_id;
+
+                    debug("got MEDIUM_REQUEST from %d, it wants %d", sender, wanted_r_id);
+
+                    add_to_medium_queue(create_process_s(sender, response_packet->ts, wanted_r_id), wanted_r_id);
+                    debug("my queue is:");
+                    // queue_print(medium_queue_table[chosen_medium]);
+                    // TODO add medium usage
+                    debug("added %d to medium_queue[%d]", sender, wanted_r_id);
+                    debug("sending MEDIUM_ACK to %d", sender);
+                    send_packet(chosen_medium, sender, MEDIUM_ACK);
                 }
             }
         }
-        debug("in critical section");
-        sleep(1000);
+
+        ack_num = 0;
+
+        while(queue_get_position(medium_queue_table[chosen_medium], rank) != 0) {
+            println("i'm not first, waiting for medium to become free");
+            receive_packet(response_packet, MEDIUM_RELEASE, &status);
+            int sender = response_packet->id;
+            queue_remove(&(medium_queue_table[chosen_medium]), sender);
+            debug("%d is out of critical section", sender);
+        }
+        debug("medium is free");
+
+        // TODO add medium usage
+
+        println("in critical section");
+        sleep(1);
+        println("out of critical section");
+        queue_clear(&(medium_queue_table[chosen_medium])); // remove was here
+        for(int i = 0; i < M; i++) {
+            queue_clear(&(medium_queue_table[i]));
+            medium_queue_table[i] = NULL;
+        }
+
+        for(int i = 0; i < size; i++) {
+            if(i != rank) {
+                send_packet(chosen_medium, i, MEDIUM_RELEASE);
+            }
+        }
+        debug("sent MEDIUM_RELEASE to eveyone");
     }
 }
 
-int get_maximum_free_T_index() {
+int choose_medium_index() {
     int max_T = -1;
     int max_T_index = -1;
-    for(int i = 0; i < T; i++) {
+    int i = rand() % M;
+    for(; i < M; i++) {
         if(medium_usage_table[i] > max_T) {
             max_T = medium_usage_table[i];
             max_T_index = i;
@@ -236,7 +288,5 @@ void add_to_medium_queue(process_s* p, int i) {
 
 int main(int argc, char** argv) {
     init(&argc, &argv);
-    printf("test\n");
-
     main_loop();
 }

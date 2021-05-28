@@ -11,7 +11,7 @@
 #include <pthread.h>
 #include "queue.h"
 /* odkomentować, jeżeli się chce DEBUGI */
-#define DEBUG 
+// #define DEBUG 
 
 typedef struct proc_queue_n process_queue_node;
 typedef struct proc process_s;
@@ -26,7 +26,7 @@ typedef struct proc process_s;
 
 #define ROOT 0
 
-#define M 10
+#define M 100
 #define F 5
 #define T 10
 
@@ -54,10 +54,12 @@ extern int number_received;
 void* start_comm_thread(void* ptr);
 
 void change_state(state_t);
-/* wysyłanie pakietu, skrót: wskaźnik do pakietu (0 oznacza stwórz pusty pakiet), do kogo, z jakim typem */
-void send_packet(process_s *pkt, int destination, int tag);
+void send_packet(int resource_id, int destination, message_t tag);
+void send_packet_ts(int resource_id, int p_ts, int destination, message_t tag);
+void send_packet_to_everyone(int resource_id, int destination, message_t tag);
 void increase_timestamp(int);
 void set_timestamp(int, int);
+int choose_medium_index();
 
 void add_to_medium_queue(process_s* p, int i);
 
@@ -84,7 +86,7 @@ void main_loop();
                                             
 */
 #ifdef DEBUG
-#define debug(FORMAT,...) printf("%c[%d;%dm [%d] [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, ts, rank, ##__VA_ARGS__, 27,0,37);
+#define debug(FORMAT,...) printf("%c[%d;%dm [%d] [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ts, ##__VA_ARGS__, 27,0,37);
 #else
 #define debug(...) ;
 #endif
@@ -100,6 +102,6 @@ void main_loop();
 #define P_CLR printf("%c[%d;%dm",27,0,37);
 
 /* printf ale z kolorkami i automatycznym wyświetlaniem RANK. Patrz debug wyżej po szczegóły, jak działa ustawianie kolorków */
-#define println(FORMAT, ...) printf("%c[%d;%dm [%d] [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, ts, rank, ##__VA_ARGS__, 27,0,37);
+#define println(FORMAT, ...) printf("%c[%d;%dm [%d] [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ts, ##__VA_ARGS__, 27,0,37);
 
 #endif
