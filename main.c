@@ -173,7 +173,7 @@ void main_loop()
 
         int chosen_medium = choose_medium_index();
 
-        println("wanna medium no. %d", chosen_medium);
+        println("wanna medium[%d]", chosen_medium);
 
         change_state(INIT);
         int msg_ts = ts; // all processes have to have request with same ts
@@ -192,17 +192,14 @@ void main_loop()
 
         // WAITING_FOR_MEDIUM
         while(ack_num != size - 1) {
-            // usleep((random() % 1000) * 1000 * 1);
+            usleep((random() % 1000) * 1000 * 1);
             MPI_Iprobe(MPI_ANY_SOURCE, MEDIUM_ACK, MPI_COMM_WORLD, &flag, &status);
             if(flag) {
                 MPI_Get_count(&status, MPI_PACKET_T, &msg_num);
                 if(msg_num > 0) {
                     receive_packet(response_packet, MEDIUM_ACK, &status);
 
-                    int sender = response_packet->id;
-                    ++ack_num;
-
-                    debug("got MEDIUM_ACK from %d", sender);
+                    int senderSHOP_REQUEST MEDIUM_ACK from %d", sender);
 
                     // int wanted_r_id = response_packet->resource_id;
                     // if(wanted_r_id == -1) {
@@ -223,10 +220,10 @@ void main_loop()
                     int sender = response_packet->id;
                     int wanted_r_id = response_packet->resource_id;
 
-                    debug("got MEDIUM_REQUEST from %d, it wants %d", sender, wanted_r_id);
+                    debug("got MEDIUM_REQUEST from %d, it wants medium[%d]", sender, wanted_r_id);
 
                     add_to_medium_queue(create_process_s(sender, response_packet->ts, wanted_r_id), wanted_r_id);
-                    debug("my queue is:");
+                    // debug("my queue is:");
                     // queue_print(medium_queue_table[chosen_medium]);
                     // TODO add medium usage
                     debug("added %d to medium_queue[%d]", sender, wanted_r_id);
@@ -242,28 +239,46 @@ void main_loop()
             println("i'm not first, waiting for medium to become free");
             receive_packet(response_packet, MEDIUM_RELEASE, &status);
             int sender = response_packet->id;
-            queue_remove(&(medium_queue_table[chosen_medium]), sender);
-            debug("%d is out of critical section", sender);
+            int wanted_r_id = response_packet->resource_id;
+            // debug("my queue is:");
+            // queue_print(medium_queue_table[wanted_r_id]);
+            queue_remove(&(medium_queue_table[wanted_r_id]), sender);
+            debug("%d released medium[%d]", sender, wanted_r_id);
         }
-        debug("medium is free");
+        debug("medium[%d] is free", chosen_medium);
 
         // TODO add medium usage
 
-        println("in critical section");
-        sleep(1);
-        println("out of critical section");
-        queue_clear(&(medium_queue_table[chosen_medium])); // remove was here
-        for(int i = 0; i < M; i++) {
-            queue_clear(&(medium_queue_table[i]));
-            medium_queue_table[i] = NULL;
-        }
+        println("*** in critical section[%d] ***", chosen_medium);
+        sleep(5);
+        // println("*** out of critical section ***");
+        // TODO move ^ to other place
+        queue_remove(&(medium_queue_table[chosen_medium]), rank);
 
         for(int i = 0; i < size; i++) {
             if(i != rank) {
                 send_packet(chosen_medium, i, MEDIUM_RELEASE);
             }
-        }
+        } // TODO move this block to other place
         debug("sent MEDIUM_RELEASE to eveyone");
+
+
+        println("switching state to SHOP_PREPARE");
+        change_state(SHOP_PREPARE);
+
+        msg_ts = ts;
+
+        for(int i = 0; i < size; i++) {
+            if(rank != i) {
+                send_packet_ts(0, msg_ts, i, SHOP_REQUEST);
+            }
+        }
+        debug("sent SHOP_REQUEST to everyone");
+
+        queue_add(&shop_queue, create_process_s(rank, msg_ts, 0));
+        debug("added myself to shop_queue");
+
+        change_state()
     }
 }
 

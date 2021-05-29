@@ -11,7 +11,7 @@
 #include <pthread.h>
 #include "queue.h"
 /* odkomentować, jeżeli się chce DEBUGI */
-// #define DEBUG 
+#define DEBUG 
 
 typedef struct proc_queue_n process_queue_node;
 typedef struct proc process_s;
@@ -26,7 +26,7 @@ typedef struct proc process_s;
 
 #define ROOT 0
 
-#define M 100
+#define M 10
 #define F 5
 #define T 10
 
