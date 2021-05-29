@@ -26,7 +26,7 @@ typedef struct proc process_s;
 
 #define ROOT 0
 
-#define M 10
+#define M 1
 #define F 5
 #define T 10
 
@@ -40,6 +40,8 @@ int size;
 int medium_i;
 int ts;
 int free_F;
+int chosen_medium;
+int ack_num;
 
 process_queue_node* shop_queue;
 
@@ -47,6 +49,8 @@ process_queue_node** medium_queue_table;
 process_queue_node** in_tunnel_queue;
 
 int* medium_usage_table;
+
+pthread_t comm_thread;
 
 /* ilu już odpowiedziało na GIVEMESTATE */
 extern int number_received;
@@ -62,8 +66,14 @@ void set_timestamp(int, int);
 int choose_medium_index();
 
 void add_to_medium_queue(process_s* p, int i);
+void remove_from_medium_queue(int id, int medium_id);
+int get_index_in_medium_queue(int id, int m_id);
 
 void main_loop();
+
+void inc_ack_num();
+void zero_ack_num();
+int get_ack_num();
 
 /* Typy wiadomości */
 
