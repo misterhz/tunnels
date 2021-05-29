@@ -226,6 +226,8 @@ void main_loop() {
             usleep(50000);
         }
 
+        usage = get_medium_usage(chosen_medium);
+
         increase_medium_usage(chosen_medium, -1);
 
         debug("*** in critical section[%d] ***", chosen_medium);
@@ -241,8 +243,7 @@ void main_loop() {
         }
         debug("sent MEDIUM_RELEASE[%d] to everyone", chosen_medium);
         
-        debug("usage is %d", usage);
-        if(get_medium_usage(chosen_medium) == 0) { // used to be usage == 1 here
+        if(usage == 1) { // used to be usage == 1 here
             // 1 was before me, so it is 0 after me and it has to be recharged
             pthread_cond_signal(&recharge_cond);
         }
