@@ -9,14 +9,14 @@ pthread_t comm_thread;
 
 pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ts_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 pthread_mutex_t shop_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t in_tunnel_mutex = PTHREAD_MUTEX_INITIALIZER; // maybe change to array
 pthread_mutex_t medium_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t msg_ack_num_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_mutex_t medium_mutex_table[M] = {PTHREAD_MUTEX_INITIALIZER};
+pthread_cond_t recharge_cond = PTHREAD_COND_INITIALIZER;
 
+pthread_mutex_t medium_mutex_table[M] = {PTHREAD_MUTEX_INITIALIZER};
 
 MPI_Datatype MPI_PACKET_T;
 
@@ -215,6 +215,19 @@ void main_loop() {
             usleep(50000);
         }
 
+        int usage = get_medium_usage(chosen_medium);
+        if(usage > 0) {
+            debug("medium[%d] has enough usages left", chosen_medium);
+        } else {
+            debug("medium[%d] has to be recharged", chosen_medium);
+        }
+
+        while(get_medium_usage(chosen_medium) < 1) {
+            usleep(50000);
+        }
+
+        increase_medium_usage(chosen_medium, -1);
+
         debug("*** in critical section[%d] ***", chosen_medium);
         sleep(1);
         debug("*** out of critical section[%d] ***", chosen_medium);
@@ -227,6 +240,12 @@ void main_loop() {
             }
         }
         debug("sent MEDIUM_RELEASE[%d] to everyone", chosen_medium);
+        
+        debug("usage is %d", usage);
+        if(get_medium_usage(chosen_medium) == 0) { // used to be usage == 1 here
+            // 1 was before me, so it is 0 after me and it has to be recharged
+            pthread_cond_signal(&recharge_cond);
+        }
     }
 }
 
@@ -257,10 +276,45 @@ void* start_comm_thread(void* ptr) {
             
             case MEDIUM_RELEASE:
                 debug("received MEDIUM_RELEASE[%d] from %d", wanted_r_id, sender);
+                increase_medium_usage(wanted_r_id, -1); // medium usage is decreased by 1
                 remove_from_medium_queue(response_packet->id, response_packet->resource_id);
                 debug("removed %d from medium_queue[%d]", sender, wanted_r_id);
                 break;
+
+            case MEDIUM_RESET:
+                debug("received MEDIUM_RESET[%d]", wanted_r_id);
+                increase_medium_usage(wanted_r_id, T);
+                debug("medium[%d] has %d usages now", wanted_r_id, get_medium_usage(wanted_r_id));
+                break;
         }
+    }
+}
+
+void* send_reset(void* ptr) {
+    int* r_id_p = (int*) ptr;
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+    while(1) {
+        pthread_mutex_lock(&lock);
+        pthread_cond_wait(&recharge_cond, &lock);
+        int r_id = *r_id_p;
+        // while(!recharge_bool) {
+        //     usleep(50000);
+        // }
+        recharge_bool = 0;
+
+        debug("medium[%d] is being recharged", r_id);
+        sleep(5); // TODO change to random
+        for(int i = 0; i < size; i++) {
+            if(rank != i) {
+                send_packet(r_id, i, MEDIUM_RESET);
+            }
+        }
+        debug("sent MEDIUM_RESET[%d] to everyone", chosen_medium);
+        int res = increase_medium_usage(r_id, T);
+        debug("recharged medium[%d] locally, it has %d usages now", r_id, get_medium_usage(r_id));
+
+        pthread_mutex_unlock(&lock);
     }
 }
 
@@ -292,10 +346,24 @@ void remove_from_medium_queue(int id, int medium_id) {
 }
 
 int get_index_in_medium_queue(int id, int m_id) {
-    int ret;
     pthread_mutex_lock(&medium_mutex_table[m_id]);
-    ret = queue_get_position(medium_queue_table[m_id], id);
+    int ret = queue_get_position(medium_queue_table[m_id], id);
     pthread_mutex_unlock(&medium_mutex_table[m_id]);
+    return ret;
+}
+
+int increase_medium_usage(int r_id, int num) {
+    pthread_mutex_lock(&medium_mutex_table[r_id]);
+    medium_usage_table[r_id] += num;
+    int ret = medium_usage_table[r_id];
+    pthread_mutex_unlock(&medium_mutex_table[r_id]);
+    return ret;
+}
+
+int get_medium_usage(int r_id) {
+    pthread_mutex_lock(&medium_mutex_table[r_id]);
+    int ret = medium_usage_table[r_id];
+    pthread_mutex_unlock(&medium_mutex_table[r_id]);
     return ret;
 }
 
@@ -303,5 +371,6 @@ int main(int argc, char** argv) {
     init(&argc, &argv);
     
     pthread_create(&comm_thread, NULL, start_comm_thread, 0);
+    pthread_create(&recharge_thread, NULL, send_reset, (void*) &chosen_medium);
     main_loop();
 }

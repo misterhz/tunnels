@@ -28,7 +28,7 @@ typedef struct proc process_s;
 
 #define M 1
 #define F 5
-#define T 10
+#define T 1
 
 /* stany procesu */
 typedef enum {INIT, MEDIUM_PREPARE, WAITING_FOR_MEDIUM, WAITING_FOR_RESET, SHOP_PREPARE, WAITING_FOR_SHOP, IN_SHOP, IN_TUNNEL, WANNA_EXIT_TUNNEL, CHILL} state_t;
@@ -51,11 +51,13 @@ process_queue_node** in_tunnel_queue;
 int* medium_usage_table;
 
 pthread_t comm_thread;
+pthread_t recharge_thread;
 
 /* ilu już odpowiedziało na GIVEMESTATE */
 extern int number_received;
 
 void* start_comm_thread(void* ptr);
+void* send_reset(void*);
 
 void change_state(state_t);
 void send_packet(int resource_id, int destination, message_t tag);
@@ -74,6 +76,11 @@ void main_loop();
 void inc_ack_num();
 void zero_ack_num();
 int get_ack_num();
+
+int increase_medium_usage(int r_id, int num);
+int get_medium_usage(int r_id);
+
+int recharge_bool = 0;
 
 /* Typy wiadomości */
 
