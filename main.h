@@ -19,6 +19,18 @@
 #define F 1
 #define T 1
 
+#define IN_SHOP_MIN_MS 0
+#define IN_SHOP_MAX_MS 10000
+
+#define IN_TUNNEL_MIN_MS 0
+#define IN_TUNNEL_MAX_MS 10000
+
+#define CHILL_MIN_MS 0
+#define CHILL_MAX_MS 10000
+
+#define RECHARGE_MIN_MS 0
+#define RECHARGE_MAX_MS 10000
+
 /* stany procesu */
 typedef enum { INIT, MEDIUM_PREPARE, WAITING_FOR_MEDIUM, WAITING_FOR_RESET, SHOP_PREPARE, WAITING_FOR_SHOP, IN_SHOP, IN_TUNNEL, WANNA_EXIT_TUNNEL, CHILL } state_t;
 typedef enum { MEDIUM_REQUEST, MEDIUM_ACK, MEDIUM_RELEASE, MEDIUM_RESET, SHOP_REQUEST, SHOP_ACK, SHOP_RELEASE, LEFT_TUNNEL } message_t;
@@ -71,6 +83,8 @@ int get_ack_num();
 
 int increase_medium_usage(int r_id, int num);
 int get_medium_usage(int r_id);
+
+int get_random_time_ms(int lb, int ub);
 
 /* Typy wiadomości */
 

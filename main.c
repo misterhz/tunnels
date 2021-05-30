@@ -7,6 +7,8 @@ state_t state;
 int size, rank; /* nie trzeba zerować, bo zmienna globalna statyczna */
 pthread_t comm_thread;
 
+int time_wait;
+
 pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ts_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t shop_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -293,7 +295,11 @@ void main_loop() {
         change_state(IN_SHOP);
         println("switched state to IN_SHOP");
 
-        sleep(5); // TODO change to random
+        time_wait = get_random_time_ms(IN_SHOP_MIN_MS, IN_SHOP_MAX_MS);
+        debug("here");
+        debug("gonna spend %d ms in shop", time_wait);
+        usleep((useconds_t) (time_wait * 1000));
+
         println("*** left shop ***");
 
         remove_from_shop_queue(rank);
@@ -328,7 +334,10 @@ void main_loop() {
         debug("sent MEDIUM_RELEASE[%d] to everyone", chosen_medium);
 
         println("going through tunnel");
-        sleep(5); // TODO change to random
+        
+        time_wait = get_random_time_ms(IN_TUNNEL_MIN_MS, IN_TUNNEL_MAX_MS);
+        debug("gonna spend %d ms in tunnel", time_wait);
+        usleep(time_wait * 1000);
 
         println("wanna exit tunnel");
 
@@ -360,7 +369,9 @@ void main_loop() {
         change_state(CHILL);
         println("switched state to CHILL");
 
-        sleep(5); // TODO change to random
+        time_wait = get_random_time_ms(CHILL_MIN_MS, CHILL_MAX_MS);
+        debug("gonna spend %d ms chilling", time_wait);
+        usleep(time_wait * 1000);
         
         println("gonna return");
     }
@@ -380,7 +391,6 @@ void* start_comm_thread(void* ptr) {
                 add_to_medium_queue(copy_process_s(response_packet), wanted_r_id);
                 debug("added %d to medium_queue[%d]", sender, wanted_r_id);
                 add_to_tunnel_queue(copy_process_s(response_packet), wanted_r_id);
-                queue_print(in_tunnel_queue_table[wanted_r_id]);
                 debug("added %d to tunnel_queue[%d]", sender, wanted_r_id);
                 send_packet(wanted_r_id, sender, MEDIUM_ACK);
                 debug("sent MEDIUM_ACK[%d] to %d", wanted_r_id, sender);
@@ -452,7 +462,11 @@ void* send_reset(void* ptr) {
         int r_id = *r_id_p;
 
         debug("medium[%d] is being recharged", r_id);
-        sleep(5); // TODO change to random
+
+        time_wait = get_random_time_ms(RECHARGE_MIN_MS, RECHARGE_MAX_MS);
+        debug("gonna spend %d ms recharging medium[%d]", time_wait, r_id);
+        usleep(time_wait * 1000);
+
         for(int i = 0; i < size; i++) {
             if(rank != i) {
                 send_packet(r_id, i, MEDIUM_RESET);
@@ -568,6 +582,13 @@ int get_medium_usage(int r_id) {
     int ret = medium_usage_table[r_id];
     pthread_mutex_unlock(&medium_mutex_table[r_id]);
     return ret;
+}
+
+int get_random_time_ms(int min, int max) {
+    min = min > 0 ? min : 1;
+    max = max > 0 ? max : 1;
+    int diff = max - min;
+    return (rand() % diff) + min;
 }
 
 int main(int argc, char** argv) {
