@@ -3,7 +3,7 @@
 #include "queue.h"
 #include "main.h"
 
-state_t state = MEDIUM_PREPARE;
+state_t state;
 int size, rank; /* nie trzeba zerować, bo zmienna globalna statyczna */
 pthread_t comm_thread;
 
@@ -14,9 +14,14 @@ pthread_mutex_t in_tunnel_mutex = PTHREAD_MUTEX_INITIALIZER; // maybe change to 
 pthread_mutex_t medium_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t msg_ack_num_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+pthread_mutex_t main_loop_cond_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 pthread_cond_t recharge_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t medium_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t shop_cond = PTHREAD_COND_INITIALIZER;
 
 pthread_mutex_t medium_mutex_table[M] = {PTHREAD_MUTEX_INITIALIZER};
+pthread_mutex_t tunnel_mutex_table[M] = {PTHREAD_MUTEX_INITIALIZER};
 
 MPI_Datatype MPI_PACKET_T;
 
@@ -79,7 +84,7 @@ int init(int* argc, char*** argv) {
         medium_queue_table[i] = NULL;
     }
     // shop_queue doesn't need init
-    in_tunnel_queue = malloc(M * sizeof(process_queue_node*));
+    in_tunnel_queue_table = malloc(M * sizeof(process_queue_node*));
 
     medium_usage_table = malloc(M * sizeof(int));
     for(int i = 0; i < M; i++) {
@@ -157,9 +162,8 @@ void inc_ack_num() {
 }
 
 int get_ack_num() {
-    int ret;
     pthread_mutex_lock(&msg_ack_num_mutex);
-    ret = ack_num;
+    int ret = ack_num;
     pthread_mutex_unlock(&msg_ack_num_mutex);
     return ret;
 }
@@ -183,7 +187,7 @@ void main_loop() {
         println("wanna medium[%d]", chosen_medium);
 
         add_to_medium_queue(create_process_s(rank, msg_ts, chosen_medium), chosen_medium);
-        debug("added myself to medium_queue[%d]", chosen_medium);
+        debug("added myself to medium_queue[%d] with ts %d", chosen_medium, msg_ts);
 
         for(int i = 0; i < size; i++) {
             if(rank != i) {
@@ -197,9 +201,11 @@ void main_loop() {
         change_state(WAITING_FOR_MEDIUM);
         println("switched state to WAITING_FOR_MEDIUM");
 
-        while(get_ack_num() != size - 1) {
-            usleep(50000);
+        pthread_mutex_lock(&main_loop_cond_mutex); // used to be msg...  mutex
+        while(get_ack_num() < size - 1) {
+            pthread_cond_wait(&medium_cond, &main_loop_cond_mutex);
         }
+        pthread_mutex_unlock(&main_loop_cond_mutex);
         zero_ack_num();
         
         debug("got all MEDIUM_ACKs[%d]", chosen_medium);
@@ -211,9 +217,11 @@ void main_loop() {
             debug("have to wait to get medium[%d]", chosen_medium);
         }
 
+        pthread_mutex_lock(&main_loop_cond_mutex); // used to be medium_mutex_table[chosen_medium]
         while(get_index_in_medium_queue(rank, chosen_medium) != 0) {
-            usleep(50000);
+            pthread_cond_wait(&medium_cond, &main_loop_cond_mutex);
         }
+        pthread_mutex_unlock(&main_loop_cond_mutex);
 
         int usage = get_medium_usage(chosen_medium);
         if(usage > 0) {
@@ -222,19 +230,88 @@ void main_loop() {
             debug("medium[%d] has to be recharged", chosen_medium);
         }
 
-        while(get_medium_usage(chosen_medium) < 1) {
-            usleep(50000);
+        pthread_mutex_lock(&main_loop_cond_mutex); // used to be medium_mutex_table[chosen_medium]
+        while((usage = get_medium_usage(chosen_medium)) < 1) {
+            pthread_cond_wait(&medium_cond, &main_loop_cond_mutex);
         }
-
-        usage = get_medium_usage(chosen_medium);
+        pthread_mutex_unlock(&main_loop_cond_mutex);
 
         increase_medium_usage(chosen_medium, -1);
 
-        debug("*** in critical section[%d] ***", chosen_medium);
-        sleep(1);
-        debug("*** out of critical section[%d] ***", chosen_medium);
+        println("*** acquired medium[%d] ***", chosen_medium);
+
+        // SHOP_PREPARE
+
+        change_state(SHOP_PREPARE);
+        println("switched state to SHOP_PREPARE");
+
+        msg_ts = ts;
+        
+        println("wanna enter shop");
+        add_to_shop_queue(create_process_s(rank, msg_ts, 1));
+        debug("added myself to shop_queue with ts %d", msg_ts);
+
+        for(int i = 0; i < size; i++) {
+            if(rank != i) {
+                send_packet_ts(1, msg_ts, i, SHOP_REQUEST);
+            }
+        }
+        debug("sent SHOP_REQUEST to everyone");
+
+        // WAITING_FOR_SHOP
+
+        change_state(WAITING_FOR_SHOP);
+        println("switched state to WAITING_FOR_SHOP");
+
+        pthread_mutex_lock(&main_loop_cond_mutex); // used to be msg...  mutex
+        while(get_ack_num() < size - 1) {
+            pthread_cond_wait(&shop_cond, &main_loop_cond_mutex);
+        }
+        pthread_mutex_unlock(&main_loop_cond_mutex);
+        zero_ack_num();
+
+        debug("got all SHOP_ACKs");
+
+        position = get_index_in_shop_queue(rank);
+        if(position < F) {
+            debug("shop has enough space");
+        } else {
+            debug("have to wait to enter shop");
+        }
+
+        pthread_mutex_lock(&main_loop_cond_mutex); // used to be medium_mutex_table[chosen_medium]
+        while(get_index_in_shop_queue(rank) >= F) {
+            pthread_cond_wait(&shop_cond, &main_loop_cond_mutex);
+        }
+        pthread_mutex_unlock(&main_loop_cond_mutex);
+
+        println("*** entered shop ***");
+
+        // IN_SHOP
+
+        change_state(IN_SHOP);
+        println("switched state to IN_SHOP");
+
+        sleep(5);
+        println("*** left shop ***");
+
+        remove_from_shop_queue(rank);
+
+        for(int i = 0; i < size; i++) {
+            if(i != rank) {
+                send_packet(1, i, SHOP_RELEASE);
+            }
+        }
+
+        debug("sent SHOP_RELEASE to everyone");
+
+        println("*** released medium[%d] ***", chosen_medium);
 
         remove_from_medium_queue(rank, chosen_medium);
+
+        if(usage == 1) { // 1 was before me, so it is 0 after me and it has to be recharged
+            pthread_cond_signal(&recharge_cond);
+        }
 
         for(int i = 0; i < size; i++) {
             if(i != rank) {
@@ -242,11 +319,6 @@ void main_loop() {
             }
         }
         debug("sent MEDIUM_RELEASE[%d] to everyone", chosen_medium);
-        
-        if(usage == 1) { // used to be usage == 1 here
-            // 1 was before me, so it is 0 after me and it has to be recharged
-            pthread_cond_signal(&recharge_cond);
-        }
     }
 }
 
@@ -261,7 +333,7 @@ void* start_comm_thread(void* ptr) {
         switch(status.MPI_TAG) {
             case MEDIUM_REQUEST:
                 debug("received MEDIUM_REQUEST[%d] from %d", wanted_r_id, sender);
-                add_to_medium_queue(copy_process_s(response_packet), response_packet->resource_id);
+                add_to_medium_queue(copy_process_s(response_packet), wanted_r_id);
                 debug("added %d to medium_queue[%d]", sender, wanted_r_id);
                 send_packet(wanted_r_id, sender, MEDIUM_ACK);
                 debug("sent MEDIUM_ACK[%d] to %d", wanted_r_id, sender);
@@ -271,14 +343,14 @@ void* start_comm_thread(void* ptr) {
                 debug("received MEDIUM_ACK[%d] from %d", wanted_r_id, sender);
                 pthread_mutex_lock(&msg_ack_num_mutex);
                 ++ack_num;
-                //wake process
                 pthread_mutex_unlock(&msg_ack_num_mutex);
+                pthread_cond_signal(&medium_cond);
                 break;
             
             case MEDIUM_RELEASE:
                 debug("received MEDIUM_RELEASE[%d] from %d", wanted_r_id, sender);
                 increase_medium_usage(wanted_r_id, -1); // medium usage is decreased by 1
-                remove_from_medium_queue(response_packet->id, response_packet->resource_id);
+                remove_from_medium_queue(sender, wanted_r_id);
                 debug("removed %d from medium_queue[%d]", sender, wanted_r_id);
                 break;
 
@@ -286,6 +358,29 @@ void* start_comm_thread(void* ptr) {
                 debug("received MEDIUM_RESET[%d]", wanted_r_id);
                 increase_medium_usage(wanted_r_id, T);
                 debug("medium[%d] has %d usages now", wanted_r_id, get_medium_usage(wanted_r_id));
+                pthread_cond_signal(&medium_cond);
+                break;
+
+            case SHOP_REQUEST:
+                debug("received SHOP_REQUEST from %d", sender);
+                add_to_shop_queue(copy_process_s(response_packet));
+                debug("added %d to shop_queue", sender);
+                send_packet(1, sender, SHOP_ACK);
+                debug("sent SHOP_ACK to %d", sender);
+                break;
+
+            case SHOP_ACK:
+                debug("received SHOP_ACK from %d", sender);
+                pthread_mutex_lock(&msg_ack_num_mutex);
+                ++ack_num;
+                pthread_mutex_unlock(&msg_ack_num_mutex);
+                pthread_cond_signal(&shop_cond);
+                break;
+            
+            case SHOP_RELEASE:
+                debug("received SHOP_RELEASE from %d", sender);
+                remove_from_shop_queue(sender);
+                debug("removed %d from shop_queue", sender);
                 break;
         }
     }
@@ -299,10 +394,6 @@ void* send_reset(void* ptr) {
         pthread_mutex_lock(&lock);
         pthread_cond_wait(&recharge_cond, &lock);
         int r_id = *r_id_p;
-        // while(!recharge_bool) {
-        //     usleep(50000);
-        // }
-        recharge_bool = 0;
 
         debug("medium[%d] is being recharged", r_id);
         sleep(5); // TODO change to random
@@ -332,6 +423,7 @@ int choose_medium_index() {
     return max_T_index;
 }
 
+// medium queue functions
 void add_to_medium_queue(process_s* p, int i) {
     pthread_mutex_lock(&medium_mutex_table[i]);
     queue_add(&(medium_queue_table[i]), p);
@@ -344,12 +436,36 @@ void remove_from_medium_queue(int id, int medium_id) {
     queue_remove(&(medium_queue_table[medium_id]), id);
     increase_timestamp(1);
     pthread_mutex_unlock(&medium_mutex_table[medium_id]);
+    pthread_cond_signal(&medium_cond);
 }
 
 int get_index_in_medium_queue(int id, int m_id) {
     pthread_mutex_lock(&medium_mutex_table[m_id]);
     int ret = queue_get_position(medium_queue_table[m_id], id);
     pthread_mutex_unlock(&medium_mutex_table[m_id]);
+    return ret;
+}
+
+// shop queue functions
+void add_to_shop_queue(process_s* p) {
+    pthread_mutex_lock(&shop_mutex);
+    queue_add(&shop_queue, p);
+    increase_timestamp(1);
+    pthread_mutex_unlock(&shop_mutex);
+}
+
+void remove_from_shop_queue(int id) {
+    pthread_mutex_lock(&shop_mutex);
+    queue_remove(&shop_queue, id);
+    increase_timestamp(1);
+    pthread_mutex_unlock(&shop_mutex);
+    pthread_cond_signal(&shop_cond);
+}
+
+int get_index_in_shop_queue(int id) {
+    pthread_mutex_lock(&shop_mutex);
+    int ret = queue_get_position(shop_queue, id);
+    pthread_mutex_unlock(&shop_mutex);
     return ret;
 }
 

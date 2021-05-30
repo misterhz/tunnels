@@ -26,8 +26,8 @@ typedef struct proc process_s;
 
 #define ROOT 0
 
-#define M 1
-#define F 5
+#define M 5
+#define F 1
 #define T 1
 
 /* stany procesu */
@@ -46,7 +46,7 @@ int ack_num;
 process_queue_node* shop_queue;
 
 process_queue_node** medium_queue_table;
-process_queue_node** in_tunnel_queue;
+process_queue_node** in_tunnel_queue_table;
 
 int* medium_usage_table;
 
@@ -71,6 +71,10 @@ void add_to_medium_queue(process_s* p, int i);
 void remove_from_medium_queue(int id, int medium_id);
 int get_index_in_medium_queue(int id, int m_id);
 
+void add_to_shop_queue(process_s* p);
+void remove_from_shop_queue(int id);
+int get_index_in_shop_queue(int id);
+
 void main_loop();
 
 void inc_ack_num();
@@ -79,8 +83,6 @@ int get_ack_num();
 
 int increase_medium_usage(int r_id, int num);
 int get_medium_usage(int r_id);
-
-int recharge_bool = 0;
 
 /* Typy wiadomości */
 
