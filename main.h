@@ -15,9 +15,9 @@
 
 #define ROOT 0
 
-#define M 5
-#define F 1
-#define T 1
+#define M 10
+#define F 5
+#define T 10
 
 #define IN_SHOP_MIN_MS 0
 #define IN_SHOP_MAX_MS 10000

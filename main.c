@@ -296,7 +296,6 @@ void main_loop() {
         println("switched state to IN_SHOP");
 
         time_wait = get_random_time_ms(IN_SHOP_MIN_MS, IN_SHOP_MAX_MS);
-        debug("here");
         debug("gonna spend %d ms in shop", time_wait);
         usleep((useconds_t) (time_wait * 1000));
 
