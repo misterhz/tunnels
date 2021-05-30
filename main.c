@@ -19,6 +19,7 @@ pthread_mutex_t main_loop_cond_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t recharge_cond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t medium_cond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t shop_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t tunnel_cond = PTHREAD_COND_INITIALIZER;
 
 pthread_mutex_t medium_mutex_table[M] = {PTHREAD_MUTEX_INITIALIZER};
 pthread_mutex_t tunnel_mutex_table[M] = {PTHREAD_MUTEX_INITIALIZER};
@@ -85,16 +86,14 @@ int init(int* argc, char*** argv) {
     }
     // shop_queue doesn't need init
     in_tunnel_queue_table = malloc(M * sizeof(process_queue_node*));
+    for(int i = 0; i < M; i++) {
+        in_tunnel_queue_table[i] = NULL;
+    }
 
     medium_usage_table = malloc(M * sizeof(int));
     for(int i = 0; i < M; i++) {
         medium_usage_table[i] = T;
     }
-
-    free_F = F;
-    ts = 0;
-    int msg_num = 0;
-    int flag = 0;
 }
 
 void change_state(state_t new_state) {
@@ -188,6 +187,8 @@ void main_loop() {
 
         add_to_medium_queue(create_process_s(rank, msg_ts, chosen_medium), chosen_medium);
         debug("added myself to medium_queue[%d] with ts %d", chosen_medium, msg_ts);
+        add_to_tunnel_queue(create_process_s(rank, msg_ts, chosen_medium), chosen_medium);
+        debug("added myself to tunnel_queue[%d] with ts %d", chosen_medium, msg_ts);
 
         for(int i = 0; i < size; i++) {
             if(rank != i) {
@@ -292,10 +293,11 @@ void main_loop() {
         change_state(IN_SHOP);
         println("switched state to IN_SHOP");
 
-        sleep(5);
+        sleep(5); // TODO change to random
         println("*** left shop ***");
 
         remove_from_shop_queue(rank);
+        debug("removed myself from shop_queue");
 
         for(int i = 0; i < size; i++) {
             if(i != rank) {
@@ -304,10 +306,15 @@ void main_loop() {
         }
 
         debug("sent SHOP_RELEASE to everyone");
+        
+        // IN_TUNNEL
+        change_state(IN_TUNNEL);
+        println("switched state to IN_TUNNEL");
 
         println("*** released medium[%d] ***", chosen_medium);
 
         remove_from_medium_queue(rank, chosen_medium);
+        debug("removed myself from medium_queue[%d]", chosen_medium);
 
         if(usage == 1) { // 1 was before me, so it is 0 after me and it has to be recharged
             pthread_cond_signal(&recharge_cond);
@@ -319,6 +326,43 @@ void main_loop() {
             }
         }
         debug("sent MEDIUM_RELEASE[%d] to everyone", chosen_medium);
+
+        println("going through tunnel");
+        sleep(5); // TODO change to random
+
+        println("wanna exit tunnel");
+
+        // WANNA_EXIT_TUNNEL
+        change_state(WANNA_EXIT_TUNNEL);
+        println("switched state to WANNA_EXIT_TUNNEL");
+
+        pthread_mutex_lock(&main_loop_cond_mutex);
+        while(get_index_in_tunnel_queue(rank, chosen_medium) > 0) {
+            pthread_cond_wait(&tunnel_cond, &main_loop_cond_mutex);
+        }
+        pthread_mutex_unlock(&main_loop_cond_mutex);
+
+        debug("tunnel[%d] exit is free", chosen_medium);
+
+        remove_from_tunnel_queue(rank, chosen_medium);
+        debug("removed myself from tunnel_queue[%d]", chosen_medium);
+
+        for(int i = 0; i < size; i++) {
+            if(i != rank) {
+                send_packet(chosen_medium, i, LEFT_TUNNEL);
+            }
+        }
+        debug("sent LEFT_TUNNEL[%d] to everyone", chosen_medium);
+
+        println("exited tunnel[%d]", chosen_medium);
+
+        // CHILL
+        change_state(CHILL);
+        println("switched state to CHILL");
+
+        sleep(5); // TODO change to random
+        
+        println("gonna return");
     }
 }
 
@@ -335,6 +379,9 @@ void* start_comm_thread(void* ptr) {
                 debug("received MEDIUM_REQUEST[%d] from %d", wanted_r_id, sender);
                 add_to_medium_queue(copy_process_s(response_packet), wanted_r_id);
                 debug("added %d to medium_queue[%d]", sender, wanted_r_id);
+                add_to_tunnel_queue(copy_process_s(response_packet), wanted_r_id);
+                queue_print(in_tunnel_queue_table[wanted_r_id]);
+                debug("added %d to tunnel_queue[%d]", sender, wanted_r_id);
                 send_packet(wanted_r_id, sender, MEDIUM_ACK);
                 debug("sent MEDIUM_ACK[%d] to %d", wanted_r_id, sender);
                 break;
@@ -351,6 +398,7 @@ void* start_comm_thread(void* ptr) {
                 debug("received MEDIUM_RELEASE[%d] from %d", wanted_r_id, sender);
                 increase_medium_usage(wanted_r_id, -1); // medium usage is decreased by 1
                 remove_from_medium_queue(sender, wanted_r_id);
+                pthread_cond_signal(&medium_cond);
                 debug("removed %d from medium_queue[%d]", sender, wanted_r_id);
                 break;
 
@@ -380,7 +428,15 @@ void* start_comm_thread(void* ptr) {
             case SHOP_RELEASE:
                 debug("received SHOP_RELEASE from %d", sender);
                 remove_from_shop_queue(sender);
+                pthread_cond_signal(&shop_cond);
                 debug("removed %d from shop_queue", sender);
+                break;
+
+            case LEFT_TUNNEL:
+                debug("received LEFT_TUNNEL[%d] from %d", wanted_r_id, sender);
+                remove_from_tunnel_queue(sender, wanted_r_id);
+                pthread_cond_signal(&tunnel_cond);
+                debug("removed %d from in_tunnel_queue[%d]", sender, wanted_r_id);
                 break;
         }
     }
@@ -436,7 +492,6 @@ void remove_from_medium_queue(int id, int medium_id) {
     queue_remove(&(medium_queue_table[medium_id]), id);
     increase_timestamp(1);
     pthread_mutex_unlock(&medium_mutex_table[medium_id]);
-    pthread_cond_signal(&medium_cond);
 }
 
 int get_index_in_medium_queue(int id, int m_id) {
@@ -459,7 +514,6 @@ void remove_from_shop_queue(int id) {
     queue_remove(&shop_queue, id);
     increase_timestamp(1);
     pthread_mutex_unlock(&shop_mutex);
-    pthread_cond_signal(&shop_cond);
 }
 
 int get_index_in_shop_queue(int id) {
@@ -469,6 +523,38 @@ int get_index_in_shop_queue(int id) {
     return ret;
 }
 
+// tunnel queue functions
+void add_to_tunnel_queue(process_s* p, int i) {
+    pthread_mutex_lock(&tunnel_mutex_table[i]);
+    queue_add(&(in_tunnel_queue_table[i]), p);
+    increase_timestamp(1);
+    pthread_mutex_unlock(&tunnel_mutex_table[i]);
+}
+
+void remove_from_tunnel_queue(int id, int medium_id) {
+    pthread_mutex_lock(&tunnel_mutex_table[medium_id]);
+    queue_remove(&(in_tunnel_queue_table[medium_id]), id);
+    increase_timestamp(1);
+    pthread_mutex_unlock(&tunnel_mutex_table[medium_id]);
+    pthread_cond_signal(&tunnel_cond);
+}
+
+int get_index_in_tunnel_queue(int id, int m_id) {
+    pthread_mutex_lock(&tunnel_mutex_table[m_id]);
+    int ret = queue_get_position(in_tunnel_queue_table[m_id], id);
+    pthread_mutex_unlock(&tunnel_mutex_table[m_id]);
+    return ret;
+}
+
+// int get_index_in_medium_queue(int id, int m_id) {
+//     pthread_mutex_lock(&medium_mutex_table[m_id]);
+//     int ret = queue_get_position(medium_queue_table[m_id], id);
+//     pthread_mutex_unlock(&medium_mutex_table[m_id]);
+//     return ret;
+// }
+
+
+// medium usage functions
 int increase_medium_usage(int r_id, int num) {
     pthread_mutex_lock(&medium_mutex_table[r_id]);
     medium_usage_table[r_id] += num;

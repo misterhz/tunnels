@@ -13,17 +13,6 @@
 /* odkomentować, jeżeli się chce DEBUGI */
 #define DEBUG 
 
-typedef struct proc_queue_n process_queue_node;
-typedef struct proc process_s;
-
-/* boolean */
-#define TRUE 1
-#define FALSE 0
-
-/* używane w wątku głównym, determinuje jak często i na jak długo zmieniają się stany */
-#define STATE_CHANGE_PROB 50
-#define SEC_IN_STATE 2
-
 #define ROOT 0
 
 #define M 5
@@ -31,15 +20,13 @@ typedef struct proc process_s;
 #define T 1
 
 /* stany procesu */
-typedef enum {INIT, MEDIUM_PREPARE, WAITING_FOR_MEDIUM, WAITING_FOR_RESET, SHOP_PREPARE, WAITING_FOR_SHOP, IN_SHOP, IN_TUNNEL, WANNA_EXIT_TUNNEL, CHILL} state_t;
-typedef enum {MEDIUM_REQUEST, MEDIUM_ACK, MEDIUM_RELEASE, MEDIUM_RESET, SHOP_REQUEST, SHOP_ACK, SHOP_RELEASE} message_t;
+typedef enum { INIT, MEDIUM_PREPARE, WAITING_FOR_MEDIUM, WAITING_FOR_RESET, SHOP_PREPARE, WAITING_FOR_SHOP, IN_SHOP, IN_TUNNEL, WANNA_EXIT_TUNNEL, CHILL } state_t;
+typedef enum { MEDIUM_REQUEST, MEDIUM_ACK, MEDIUM_RELEASE, MEDIUM_RESET, SHOP_REQUEST, SHOP_ACK, SHOP_RELEASE, LEFT_TUNNEL } message_t;
 
 state_t state;
 int rank;
 int size;
-int medium_i;
 int ts;
-int free_F;
 int chosen_medium;
 int ack_num;
 
@@ -52,9 +39,6 @@ int* medium_usage_table;
 
 pthread_t comm_thread;
 pthread_t recharge_thread;
-
-/* ilu już odpowiedziało na GIVEMESTATE */
-extern int number_received;
 
 void* start_comm_thread(void* ptr);
 void* send_reset(void*);
@@ -74,6 +58,10 @@ int get_index_in_medium_queue(int id, int m_id);
 void add_to_shop_queue(process_s* p);
 void remove_from_shop_queue(int id);
 int get_index_in_shop_queue(int id);
+
+void add_to_tunnel_queue(process_s* p, int i);
+void remove_from_tunnel_queue(int id, int medium_id);
+int get_index_in_tunnel_queue(int id, int m_id);
 
 void main_loop();
 

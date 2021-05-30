@@ -132,6 +132,7 @@ int queue_get_position(process_queue_node* head, int id) {
     process_queue_node* current_node = head;
     int index = 0;
     while(current_node->proc->id != id) {
+        printf("next %d", index);
         current_node = current_node->next;
         ++index;
     }
