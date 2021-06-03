@@ -178,9 +178,10 @@ void zero_ack_num() {
 void main_loop() {
 
     while (1) {
-        // INIT
 
-        change_state(INIT);
+        // MEDIUM_PREPARE
+        change_state(MEDIUM_PREPARE);
+        debug("switched state to MEDIUM_PREPARE");
 
         chosen_medium = choose_medium_index();
         int msg_ts = ts; // all processes have to have request with same ts
@@ -316,6 +317,12 @@ void main_loop() {
         change_state(IN_TUNNEL);
         println("switched state to IN_TUNNEL");
 
+        time_wait = get_random_time_ms(OPENING_TUNNEL_MIN_MS, OPENING_TUNNEL_MAX_MS);
+        debug("gonna spend %d ms waiting for medium[%d] to open tunnel", time_wait, chosen_medium);
+        usleep((useconds_t) (time_wait * 1000));
+
+        println("tunnel[%d] is opened", chosen_medium);
+
         println("*** released medium[%d] ***", chosen_medium);
 
         remove_from_medium_queue(rank, chosen_medium);
@@ -385,6 +392,7 @@ void* start_comm_thread(void* ptr) {
         int sender = response_packet->id;
         int wanted_r_id = response_packet->resource_id;
         switch(status.MPI_TAG) {
+            
             case MEDIUM_REQUEST:
                 debug("received MEDIUM_REQUEST[%d] from %d", wanted_r_id, sender);
                 add_to_medium_queue(copy_process_s(response_packet), wanted_r_id);
